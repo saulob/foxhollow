@@ -616,7 +616,7 @@ void cardShowLoadingMsg(u8 kind) {
     u8 mode = kind;
 
     gameTextSetWindow(0);
-    for (frame = 0; frame < 0x3C; frame++) {
+    for (frame = 0; frame < 1; frame++) {
         padUpdate();
         mmFreeTick(0);
         waitNextFrame();
