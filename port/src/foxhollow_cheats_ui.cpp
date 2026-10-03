@@ -50,6 +50,7 @@ void draw_menu_contents() {
     if (ImGui::Checkbox("Jump", &jump)) {
       fhCheatsSetJump(jump ? 1 : 0);
     }
+    ImGui::TextDisabled("P / Right Stick - Jump");
     bool fly = fhCheatsFlyEnabled() != 0;
     if (ImGui::Checkbox("Fly Mode", &fly)) {
       fhCheatsSetFly(fly ? 1 : 0);
