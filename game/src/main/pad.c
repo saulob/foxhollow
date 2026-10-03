@@ -239,6 +239,19 @@ s8 padGetStickX(int port) {
     return statuses[gPadStatusBufferIndex * 4 + port].stickX;
 }
 
+u32 padGetExtButtons(int port) {
+    PADStatus* statuses;
+
+    if (port > 0) {
+        return 0;
+    }
+    if (joypadDisabled != 0 || gDvdErrorPauseActive != 0) {
+        return 0;
+    }
+    statuses = gPadStatuses[0];
+    return statuses[gPadStatusBufferIndex * 4 + port].extButton;
+}
+
 u8 padGetLTrigger(int port) {
     PADStatus* statuses;
 

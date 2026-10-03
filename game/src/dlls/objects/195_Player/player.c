@@ -11708,6 +11708,11 @@ int playerCheckCommonTransitions(GameObject* obj, PlayerState* state, PlayerStat
     f32 dummy;
     f32 idleZero = 0.0f;
 
+    r = fhCheatsJumpUpdate(obj);
+    if (r != 0) {
+        state->baddie.nextStateExitFn = playerStagedRestoreDefaultControl;
+        return r;
+    }
     if (inner->curAnimId != 0x48 && inner->curAnimId != 0x47 && !inner->flags3F0.b04 && !inner->flags3F0.b08 &&
         inner->heldObj == NULL && !inner->flags3F0.b02 && inner->baddie.targetObj == NULL && !inner->flags3F6.b40 &&
         inner->baddie.controlMode != 0x26) {

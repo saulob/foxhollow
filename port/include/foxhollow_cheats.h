@@ -24,6 +24,11 @@ int fhCheatsFastRunEnabled(void);
 void fhCheatsSetFastRun(int enabled);
 float fhCheatsMoveScale(struct GameObject* obj);
 
+int fhCheatsJumpEnabled(void);
+void fhCheatsSetJump(int enabled);
+void fhCheatsJumpPoll(int keyDown, int active);
+int fhCheatsJumpUpdate(struct GameObject* player);
+
 int fhCheatsArwingActive(void);
 int fhCheatsArwingGodModeEnabled(void);
 void fhCheatsSetArwingGodMode(int enabled);

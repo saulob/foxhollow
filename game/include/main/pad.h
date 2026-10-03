@@ -44,6 +44,7 @@ s8 padGetCY(int port);
 s8 padGetCX(int port);
 s8 padGetStickY(int port);
 s8 padGetStickX(int port);
+u32 padGetExtButtons(int port);
 u8 padGetLTrigger(int port);
 u8 padGetRTrigger(int port);
 u16 padGetTriggersPressed(int port);

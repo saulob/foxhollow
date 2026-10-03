@@ -42,6 +42,10 @@ void draw_menu_contents() {
     if (ImGui::Checkbox("Fast Movement (2x)", &fastRun)) {
       fhCheatsSetFastRun(fastRun ? 1 : 0);
     }
+    bool jump = fhCheatsJumpEnabled() != 0;
+    if (ImGui::Checkbox("Jump", &jump)) {
+      fhCheatsSetJump(jump ? 1 : 0);
+    }
     if (fhCheatsPlayerIsFox() && ImGui::Button("Give All Abilities", ImVec2(-FLT_MIN, 0.0f))) {
       fhCheatsGiveAllStaffAbilities();
     }
@@ -142,6 +146,9 @@ extern "C" void fhCheatsDrawOverlay(void) {
   } else if (toggled) {
     sOpen = !sOpen;
   }
+
+  const bool jumpKeyDown = keys != nullptr && keyCount > SDL_SCANCODE_0 && keys[SDL_SCANCODE_0];
+  fhCheatsJumpPoll(jumpKeyDown ? 1 : 0, gameplay && !sOpen && !ImGui::GetIO().WantCaptureKeyboard ? 1 : 0);
 
   if (sOpen) {
     draw_menu();
