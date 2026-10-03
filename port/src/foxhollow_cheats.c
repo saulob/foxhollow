@@ -24,6 +24,7 @@
 #include "main/gameloop_internal.h"
 #include "main/lightmap.h"
 #include "main/pad.h"
+#include "main/object_transform.h"
 #include "main/objseq.h"
 #include "main/shader.h"
 #include "main/track_dolphin.h"
@@ -56,6 +57,10 @@
 #define FH_CHEATS_NO_FLOOR_Y -1e+05f
 #define FH_CHEATS_PLAYER_TELEPORT_HOLD 0x4000
 
+#define FH_CHEATS_NOCLIP_SYNC_LOCAL_POINTS 1
+#define FH_CHEATS_NOCLIP_PUSH_EPSILON_SQ 1e-04f
+#define FH_CHEATS_NOCLIP_FLOOR_QUERY_MASK 1
+
 typedef struct FhCheatsSafePosition {
   int valid;
   Vec3f pos;
@@ -68,6 +73,7 @@ typedef struct FhCheatsSafePosition {
 static const s16 sFlyCombatModes[] = {0x1f, 0x23, 0x24, 0x25, 0x26, 0x27, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d};
 
 void playerStartWallTransition(GameObject* obj, PlayerState* inner, PlayerState* state);
+void playerRefreshCollisionState(GameObject* obj, PlayerState* p2, int flags);
 
 typedef struct FhCheatsItem {
   int gameBit;
@@ -113,6 +119,14 @@ static int sFlyDownArmed;
 static int sFlyToggleWasDown;
 static int sFlyReturnWasDown;
 static FhCheatsSafePosition sSafe;
+static int sNoclip;
+static int sNoclipToggleWasDown;
+static int sNoclipCollision;
+static f32 sNoclipPosX;
+static f32 sNoclipPosZ;
+static int sNoclipHold;
+static f32 sNoclipHoldY;
+static GameObject* sNoclipHoldPlayer;
 
 int fhCheatsGameplayActive(void) {
   return getGameState() == FH_CHEATS_GAME_STATE_RUNNING && getCurUiDll() == FH_CHEATS_UI_DLL_GAMEPLAY &&
@@ -134,6 +148,7 @@ static void reset_cheats(void) {
   sCloudRunnerRapidFire = 0;
   fhCheatsSetJump(0);
   fhCheatsSetFly(0);
+  fhCheatsSetNoclip(0);
   sSafe.valid = 0;
 }
 
@@ -380,6 +395,7 @@ void fhCheatsReturnToSafePosition(void) {
   playerTeleport(player, &sSafe.pos, &sSafe.rot, 0);
   objSetPos(player, sSafe.pos.x, sSafe.pos.y, sSafe.pos.z);
   playerTeleport(player, NULL, NULL, 0);
+  sNoclipHold = 0;
 }
 
 static int fly_key_held(int* armed, int keyDown, int active) {
@@ -491,6 +507,120 @@ void fhCheatsFlyUpdate(GameObject* player) {
   }
   fly_keep_inside_map(player, st);
   safe_position_update(player, st);
+}
+
+int fhCheatsNoclipEnabled(void) { return sNoclip; }
+
+void fhCheatsSetNoclip(int enabled) {
+  sNoclip = enabled != 0;
+  sNoclipHold = 0;
+}
+
+void fhCheatsNoclipPoll(int toggleKeyDown, int active) {
+  toggleKeyDown = toggleKeyDown != 0;
+  if (active && toggleKeyDown && !sNoclipToggleWasDown && !fhCheatsArwingActive()) {
+    fhCheatsSetNoclip(!sNoclip);
+  }
+  sNoclipToggleWasDown = toggleKeyDown;
+}
+
+static int noclip_allowed(GameObject* player, PlayerState* st) {
+  return player_controllable_on_foot(player, st) && st->focusObject == NULL &&
+         fly_mode_allowed(st->baddie.controlMode);
+}
+
+int fhCheatsNoclipActive(GameObject* player) {
+  return sNoclip && player != NULL && player == Obj_GetPlayerObject() && noclip_allowed(player, player->extra);
+}
+
+static int noclip_floor_below(GameObject* player, PlayerState* st) {
+  CurvesCollisionState* collision = &st->baddie.curvesCollision;
+  f32 depth;
+
+  if (!(collision->resultFloorY <= FH_CHEATS_NO_FLOOR_Y)) {
+    return 1;
+  }
+  if (collision->resultFloorGap <= 0.0f) {
+    return -1;
+  }
+  return trackGetHeightAboveGround(player, player->anim.localPosX, player->anim.localPosY, player->anim.localPosZ,
+                                   &depth, FH_CHEATS_NOCLIP_FLOOR_QUERY_MASK) != 0;
+}
+
+void fhCheatsNoclipUpdate(GameObject* player) {
+  PlayerState* st;
+  int floor;
+
+  if (!fhCheatsNoclipActive(player)) {
+    sNoclipHold = 0;
+    return;
+  }
+  st = player->extra;
+  fly_keep_inside_map(player, st);
+  if (sFly || st->flags3F0.b20 || player->anim.parent != NULL || safe_position_warp_active()) {
+    sNoclipHold = 0;
+    return;
+  }
+  floor = noclip_floor_below(player, st);
+  if (floor > 0 || (floor < 0 && !sNoclipHold)) {
+    sNoclipHold = 0;
+    return;
+  }
+  if (!sNoclipHold || sNoclipHoldPlayer != player) {
+    sNoclipHold = 1;
+    sNoclipHoldPlayer = player;
+    sNoclipHoldY = player->anim.localPosY;
+  }
+  player->anim.localPosY = sNoclipHoldY;
+  player->anim.velocityY = 0.0f;
+  st->flags3F0.b08 = 0;
+  st->flags3F0.b04 = 0;
+  st->staffHoldFrames = 0;
+}
+
+void fhCheatsNoclipBeginCollision(GameObject* player) {
+  sNoclipCollision = fhCheatsNoclipActive(player);
+  if (sNoclipCollision) {
+    sNoclipPosX = player->anim.localPosX;
+    sNoclipPosZ = player->anim.localPosZ;
+  }
+}
+
+static void noclip_reanchor_traces(GameObject* player, PlayerState* st) {
+  CurvesCollisionState* collision = &st->baddie.curvesCollision;
+  int count = collision->pointCounts >> CURVES_POINT_COUNT_SEGMENT_SHIFT;
+  int i;
+
+  for (i = 0; i < count; i++) {
+    collision->traceStart[i][0] = player->anim.worldPosX;
+    collision->traceStart[i][2] = player->anim.worldPosZ;
+  }
+  playerRefreshCollisionState(player, st, FH_CHEATS_NOCLIP_SYNC_LOCAL_POINTS);
+}
+
+void fhCheatsNoclipEndCollision(GameObject* player) {
+  f32 dx;
+  f32 dz;
+
+  if (!sNoclipCollision) {
+    return;
+  }
+  sNoclipCollision = 0;
+  dx = player->anim.localPosX - sNoclipPosX;
+  dz = player->anim.localPosZ - sNoclipPosZ;
+  player->anim.localPosX = sNoclipPosX;
+  player->anim.localPosZ = sNoclipPosZ;
+  if (player->anim.parent != NULL) {
+    Obj_TransformLocalPointToWorld(player->anim.localPosX, player->anim.localPosY, player->anim.localPosZ,
+                                   &player->anim.worldPosX, &player->anim.worldPosY, &player->anim.worldPosZ,
+                                   player->anim.parent);
+  } else {
+    player->anim.worldPosX = player->anim.localPosX;
+    player->anim.worldPosZ = player->anim.localPosZ;
+  }
+  if (dx * dx + dz * dz > FH_CHEATS_NOCLIP_PUSH_EPSILON_SQ) {
+    noclip_reanchor_traces(player, player->extra);
+  }
 }
 
 int fhCheatsArwingActive(void) { return fhCheatsGameplayActive() && getArwing() != NULL; }

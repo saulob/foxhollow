@@ -35,6 +35,14 @@ void fhCheatsFlyPoll(int toggleKeyDown, int upKeyDown, int downKeyDown, int retu
 void fhCheatsFlyUpdate(struct GameObject* player);
 void fhCheatsReturnToSafePosition(void);
 
+int fhCheatsNoclipEnabled(void);
+void fhCheatsSetNoclip(int enabled);
+void fhCheatsNoclipPoll(int toggleKeyDown, int active);
+int fhCheatsNoclipActive(struct GameObject* player);
+void fhCheatsNoclipUpdate(struct GameObject* player);
+void fhCheatsNoclipBeginCollision(struct GameObject* player);
+void fhCheatsNoclipEndCollision(struct GameObject* player);
+
 int fhCheatsArwingActive(void);
 int fhCheatsArwingGodModeEnabled(void);
 void fhCheatsSetArwingGodMode(int enabled);

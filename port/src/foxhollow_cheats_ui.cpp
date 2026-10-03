@@ -56,6 +56,11 @@ void draw_menu_contents() {
       fhCheatsSetFly(fly ? 1 : 0);
     }
     ImGui::TextDisabled("F5 Toggle  F6 Up  F7 Down  F8 Safe");
+    bool noclip = fhCheatsNoclipEnabled() != 0;
+    if (ImGui::Checkbox("Noclip", &noclip)) {
+      fhCheatsSetNoclip(noclip ? 1 : 0);
+    }
+    ImGui::TextDisabled("F12 Toggle");
     if (ImGui::Button("Return to Safe Position", ImVec2(-FLT_MIN, 0.0f))) {
       fhCheatsReturnToSafePosition();
     }
@@ -167,6 +172,7 @@ extern "C" void fhCheatsDrawOverlay(void) {
   fhCheatsFlyPoll(key_down(keys, keyCount, SDL_SCANCODE_F5) ? 1 : 0, key_down(keys, keyCount, SDL_SCANCODE_F6) ? 1 : 0,
                   key_down(keys, keyCount, SDL_SCANCODE_F7) ? 1 : 0, key_down(keys, keyCount, SDL_SCANCODE_F8) ? 1 : 0,
                   controlsActive ? 1 : 0);
+  fhCheatsNoclipPoll(key_down(keys, keyCount, SDL_SCANCODE_F12) ? 1 : 0, controlsActive ? 1 : 0);
 
   if (sOpen) {
     draw_menu();

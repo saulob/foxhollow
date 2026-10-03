@@ -38,6 +38,7 @@
 #include "main/obj_trigger.h"
 #include "main/player_eye_anim.h"
 #include "main/pad.h"
+#include "foxhollow_cheats.h"
 #include "main/rcp_dolphin_render.h"
 #include "main/texture.h"
 #include "main/objprint_dolphin.h"
@@ -1663,6 +1664,10 @@ void ObjHits_ApplyPairResponse(GameObject* objA, GameObject* objB, f32 x, f32 y,
     f32 sum;
     f32 blend;
     f32 invBlend;
+    f32 xA = x;
+    f32 zA = z;
+    f32 xB = x;
+    f32 zB = z;
 
     ObjContact_DispatchCallbacks(objA, objB);
     animA = &objA->anim;
@@ -1673,19 +1678,27 @@ void ObjHits_ApplyPairResponse(GameObject* objA, GameObject* objB, f32 x, f32 y,
     stateB->flags = stateB->flags | 8;
     stateA->activeHit = (uintptr_t)objB;
     stateB->activeHit = (uintptr_t)objA;
+    if (fhCheatsNoclipActive(objA)) {
+        xA = 0.0f;
+        zA = 0.0f;
+    }
+    if (fhCheatsNoclipActive(objB)) {
+        xB = 0.0f;
+        zB = 0.0f;
+    }
     if (animA->parent != NULL) {
-        Obj_TransformWorldVectorToLocal(x, y, z, &localAx, &localAy, &localAz, animA->parent);
+        Obj_TransformWorldVectorToLocal(xA, y, zA, &localAx, &localAy, &localAz, animA->parent);
     } else {
-        localAx = x;
+        localAx = xA;
         localAy = y;
-        localAz = z;
+        localAz = zA;
     }
     if (animB->parent != NULL) {
-        Obj_TransformWorldVectorToLocal(x, y, z, &localBx, &localBy, &localBz, animB->parent);
+        Obj_TransformWorldVectorToLocal(xB, y, zB, &localBx, &localBy, &localBz, animB->parent);
     } else {
-        localBx = x;
+        localBx = xB;
         localBy = y;
-        localBz = z;
+        localBz = zB;
     }
     if ((animA->classId == 1) && (stateA->lateralResponseWeight != 0) &&
         ((stateB->flags & OBJHITS_PRIORITY_STATE_IMMOVABLE) == 0)) {
@@ -1693,9 +1706,9 @@ void ObjHits_ApplyPairResponse(GameObject* objA, GameObject* objB, f32 x, f32 y,
         animA->localPosY = animA->localPosY - localAy;
         animA->localPosZ = animA->localPosZ - localAz;
         if (flag != 0) {
-            animA->worldPosX = animA->worldPosX - x;
+            animA->worldPosX = animA->worldPosX - xA;
             animA->worldPosY = animA->worldPosY - y;
-            animA->worldPosZ = animA->worldPosZ - z;
+            animA->worldPosZ = animA->worldPosZ - zA;
         } else {
             Obj_TransformLocalPointToWorld(animA->localPosX, animA->localPosY, animA->localPosZ, &animA->worldPosX,
                                            &animA->worldPosY, &animA->worldPosZ, animA->parent);
@@ -1706,9 +1719,9 @@ void ObjHits_ApplyPairResponse(GameObject* objA, GameObject* objB, f32 x, f32 y,
         animB->localPosY = animB->localPosY + localBy;
         animB->localPosZ = animB->localPosZ + localBz;
         if (flag != 0) {
-            animB->worldPosX = animB->worldPosX + x;
+            animB->worldPosX = animB->worldPosX + xB;
             animB->worldPosY = animB->worldPosY + y;
-            animB->worldPosZ = animB->worldPosZ + z;
+            animB->worldPosZ = animB->worldPosZ + zB;
         } else {
             Obj_TransformLocalPointToWorld(animB->localPosX, animB->localPosY, animB->localPosZ, &animB->worldPosX,
                                            &animB->worldPosY, &animB->worldPosZ, animB->parent);
@@ -1719,9 +1732,9 @@ void ObjHits_ApplyPairResponse(GameObject* objA, GameObject* objB, f32 x, f32 y,
             animA->localPosY = animA->localPosY - localAy;
             animA->localPosZ = animA->localPosZ - localAz;
             if (flag != 0) {
-                animA->worldPosX = animA->worldPosX - x;
+                animA->worldPosX = animA->worldPosX - xA;
                 animA->worldPosY = animA->worldPosY - y;
-                animA->worldPosZ = animA->worldPosZ - z;
+                animA->worldPosZ = animA->worldPosZ - zA;
             } else {
                 Obj_TransformLocalPointToWorld(animA->localPosX, animA->localPosY, animA->localPosZ, &animA->worldPosX,
                                                &animA->worldPosY, &animA->worldPosZ, animA->parent);
@@ -1733,9 +1746,9 @@ void ObjHits_ApplyPairResponse(GameObject* objA, GameObject* objB, f32 x, f32 y,
             animB->localPosY = animB->localPosY + localBy;
             animB->localPosZ = animB->localPosZ + localBz;
             if (flag != 0) {
-                animB->worldPosX = animB->worldPosX + x;
+                animB->worldPosX = animB->worldPosX + xB;
                 animB->worldPosY = animB->worldPosY + y;
-                animB->worldPosZ = animB->worldPosZ + z;
+                animB->worldPosZ = animB->worldPosZ + zB;
             } else {
                 Obj_TransformLocalPointToWorld(animB->localPosX, animB->localPosY, animB->localPosZ, &animB->worldPosX,
                                                &animB->worldPosY, &animB->worldPosZ, animB->parent);

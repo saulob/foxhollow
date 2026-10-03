@@ -9624,7 +9624,9 @@ int playerCheckIfClimbingOntoWall(GameObject* obj, PlayerState* state, PlayerSta
     s8 flagA;
     u8 hit;
     int ai;
+    int noclip;
 
+    noclip = fhCheatsNoclipActive(obj);
     ai = (u16)getAngle(state2->baddie.moveInputX, -state2->baddie.moveInputZ) - state2->baddie.cameraYaw;
     rot[0] = -mathSinf((3.1415927f * (f32)ai) / 32768.0f);
     rot[1] = 0.0f;
@@ -9638,7 +9640,7 @@ int playerCheckIfClimbingOntoWall(GameObject* obj, PlayerState* state, PlayerSta
     sc0p[2] = 50.0f * vec[2];
     state->flags360 = state->flags360 & ~PLAYER_FLAG_LEDGE_DETECTED;
     for (i = 0; i < 13; i++) {
-        if ((probeMask & dirMasks[i]) == 0) {
+        if ((probeMask & dirMasks[i]) == 0 || (noclip && i != 11)) {
             continue;
         }
         ok = 0;
@@ -15307,9 +15309,11 @@ void playerDoHitDetection(GameObject* obj) {
         inner->baddie.physicsActive = 0;
     }
 
+    fhCheatsNoclipBeginCollision(obj);
     (*gPathControlInterface)->update((void*)obj, &inner->baddie.curvesCollision, timeDelta);
     (*gPathControlInterface)->apply((void*)obj, &inner->baddie.curvesCollision);
     (*gPathControlInterface)->advance((void*)obj, &inner->baddie.curvesCollision, timeDelta);
+    fhCheatsNoclipEndCollision(obj);
     ObjModelChain_AdvancePhase(gPlayerModelChain);
     if (inner->cutsceneTimer >= 6.0f) {
         return;
@@ -15595,6 +15599,7 @@ void playerUpdate(GameObject* obj) {
     playerUpdateSurfaceResponse(obj, inner, inner, dt);
     playerUpdateVelocityFromMotion(obj, inner, &inner->baddie, dt);
     fhCheatsFlyUpdate(obj);
+    fhCheatsNoclipUpdate(obj);
     {
         f32 t = obj->anim.velocityX;
         obj->anim.velocityX = (t < -5.0f) ? -5.0f : ((t > 5.0f) ? 5.0f : t);
