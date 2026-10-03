@@ -56,6 +56,11 @@ void fhCheatsUpdate(void);
 void fhCheatsGiveAllItems(void);
 void fhCheatsGiveAllStaffAbilities(void);
 
+int fhCheatsScarabCount(void);
+int fhCheatsScarabCapacity(void);
+void fhCheatsResetScarabBag(void);
+void fhCheatsAddScarabs(void);
+
 void fhCheatsDrawOverlay(void);
 
 #ifdef __cplusplus

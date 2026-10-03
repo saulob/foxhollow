@@ -61,6 +61,13 @@ void draw_menu_contents() {
       if (ImGui::Button("Give All Items", ImVec2(-FLT_MIN, 0.0f))) {
         fhCheatsGiveAllItems();
       }
+      ImGui::Text("Scarabs: %d / %d", fhCheatsScarabCount(), fhCheatsScarabCapacity());
+      if (ImGui::Button("Reset Scarab Bag", ImVec2(-FLT_MIN, 0.0f))) {
+        fhCheatsResetScarabBag();
+      }
+      if (ImGui::Button("Add 10 Scarabs", ImVec2(-FLT_MIN, 0.0f))) {
+        fhCheatsAddScarabs();
+      }
     }
   }
 

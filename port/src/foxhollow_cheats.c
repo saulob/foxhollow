@@ -27,6 +27,10 @@
 #define FH_CHEATS_ARWING_BOMBS 3
 #define FH_CHEATS_ARWING_RINGS 10
 #define FH_CHEATS_MAX_SCARABS 200
+#define FH_CHEATS_100_BAG_SCARABS 100
+#define FH_CHEATS_50_BAG_SCARABS 50
+#define FH_CHEATS_START_SCARABS 10
+#define FH_CHEATS_ADD_SCARABS 10
 #define FH_CHEATS_GLITCHED_ITEM_TEXT 0x404
 #define FH_CHEATS_FAST_MOVEMENT_SCALE 2.0f
 
@@ -38,6 +42,12 @@ typedef struct FhCheatsItem {
 static const FhCheatsItem sItems[] = {
     {GAMEBIT_ITEM_TrickyFood_Count, 15}, {GAMEBIT_ITEM_BombSpore_Count, 7}, {GAMEBIT_ITEM_MoonSeed_Count, 7},
     {GAMEBIT_ITEM_Firefly_Count, 31},    {GAMEBIT_ITEM_FuelCell_Count, 42},
+};
+
+static const int sScarabBagBits[] = {
+    GAMEBIT_ITEM_50ScarabBag_Got,
+    GAMEBIT_ITEM_100ScarabBag_Got,
+    GAMEBIT_ITEM_200ScarabBag_Got,
 };
 
 extern CMenuItemDef gCMenuCollectableItems[];
@@ -338,4 +348,69 @@ void fhCheatsGiveAllStaffAbilities(void) {
       playerAddRemoveMagic(player, missing);
     }
   }
+}
+
+static GameObject* scarab_player(void) {
+  if (!fhCheatsGameplayActive() || fhCheatsArwingActive() || !fhCheatsPlayerIsFox()) {
+    return NULL;
+  }
+  return Obj_GetPlayerObject();
+}
+
+static void clear_scarab_bag_bits(void) {
+  int i;
+
+  for (i = 0; i < (int)(sizeof(sScarabBagBits) / sizeof(sScarabBagBits[0])); i++) {
+    if (mainGetBit(sScarabBagBits[i]) != 0) {
+      mainSetBits(sScarabBagBits[i], 0);
+    }
+  }
+}
+
+int fhCheatsScarabCount(void) {
+  GameObject* player = scarab_player();
+  return player != NULL ? playerGetMoney(player) : 0;
+}
+
+int fhCheatsScarabCapacity(void) {
+  if (mainGetBit(GAMEBIT_ITEM_200ScarabBag_Got) != 0) {
+    return FH_CHEATS_MAX_SCARABS;
+  }
+  if (mainGetBit(GAMEBIT_ITEM_100ScarabBag_Got) != 0) {
+    return FH_CHEATS_100_BAG_SCARABS;
+  }
+  if (mainGetBit(GAMEBIT_ITEM_50ScarabBag_Got) != 0) {
+    return FH_CHEATS_50_BAG_SCARABS;
+  }
+  return FH_CHEATS_START_SCARABS;
+}
+
+void fhCheatsResetScarabBag(void) {
+  GameObject* player = scarab_player();
+
+  if (player == NULL) {
+    return;
+  }
+  clear_scarab_bag_bits();
+  playerAddMoney(player, FH_CHEATS_START_SCARABS - playerGetMoney(player));
+}
+
+void fhCheatsAddScarabs(void) {
+  GameObject* player = scarab_player();
+  int capacity;
+
+  if (player == NULL) {
+    return;
+  }
+  capacity = fhCheatsScarabCapacity();
+  if (playerGetMoney(player) + FH_CHEATS_ADD_SCARABS > capacity) {
+    if (capacity == FH_CHEATS_START_SCARABS) {
+      mainSetBits(GAMEBIT_ITEM_50ScarabBag_Got, 1);
+    } else if (capacity == FH_CHEATS_50_BAG_SCARABS) {
+      mainSetBits(GAMEBIT_ITEM_100ScarabBag_Got, 1);
+    } else if (capacity == FH_CHEATS_100_BAG_SCARABS) {
+      mainSetBits(GAMEBIT_ITEM_200ScarabBag_Got, 1);
+    }
+  }
+  playerAddMoney(player, FH_CHEATS_ADD_SCARABS);
 }
