@@ -15594,6 +15594,7 @@ void playerUpdate(GameObject* obj) {
     staffAnimate(obj, inner, dt);
     playerUpdateSurfaceResponse(obj, inner, inner, dt);
     playerUpdateVelocityFromMotion(obj, inner, &inner->baddie, dt);
+    fhCheatsFlyUpdate(obj);
     {
         f32 t = obj->anim.velocityX;
         obj->anim.velocityX = (t < -5.0f) ? -5.0f : ((t > 5.0f) ? 5.0f : t);

@@ -14,16 +14,21 @@
 #include "main/obj_list.h"
 #include "main/dll/ARW/dll_029A_arwarwing.h"
 #include "main/dll/cmenu_item_table.h"
+#include "main/dll/dll_0044_cameramodeviewfinder.h"
+#include "main/dll/dll_004E_cameramodeworldmap.h"
 #include "main/dll/player.h"
 #include "main/dll/player_state.h"
 #include "main/dll/player_status.h"
 #include "main/dll/savegame_load.h"
+#include "main/frame_timing.h"
+#include "main/gameloop_internal.h"
+#include "main/lightmap.h"
 #include "main/pad.h"
 #include "main/objseq.h"
+#include "main/shader.h"
+#include "main/track_dolphin.h"
 #include "sys/objects.h"
 #include "sys/objects/lifecycle.h"
-
-#include <stdio.h>
 
 #define FH_CHEATS_GAME_STATE_RUNNING 1
 #define FH_CHEATS_UI_DLL_GAMEPLAY 1
@@ -44,22 +49,23 @@
 #define FH_CHEATS_PLAYER_MODE_IDLE 1
 #define FH_CHEATS_PLAYER_MODE_MOVING 2
 #define FH_CHEATS_PLAYER_ENTER_MOVING (FH_CHEATS_PLAYER_MODE_MOVING + 1)
+#define FH_CHEATS_PLAYER_MODE_ON_CLOUDRUNNER 0x1a
 
-#define DEBUG_SAULO_JUMP_LOG(...)                                                                                      \
-  do {                                                                                                                 \
-    fprintf(stderr, "[DEBUG_SAULO][Jump] " __VA_ARGS__);                                                               \
-    fputc('\n', stderr);                                                                                               \
-    fflush(stderr);                                                                                                    \
-  } while (0)
-#define DEBUG_SAULO_JUMP_GROUND_RETRACES 30
-#define DEBUG_SAULO_JUMP_TRACK_RETRACES 600
+#define FH_CHEATS_FLY_VERTICAL_SPEED 1.25f
+#define FH_CHEATS_FLY_SWIM_SURFACE_DEPTH 22.0f
+#define FH_CHEATS_NO_FLOOR_Y -1e+05f
+#define FH_CHEATS_PLAYER_TELEPORT_HOLD 0x4000
 
-typedef enum FhCheatsJumpSource {
-  FH_CHEATS_JUMP_SOURCE_KEYBOARD,
-  FH_CHEATS_JUMP_SOURCE_RIGHT_STICK,
-} FhCheatsJumpSource;
+typedef struct FhCheatsSafePosition {
+  int valid;
+  Vec3f pos;
+  Vec3s rot;
+  int swimming;
+  int mapId;
+  int layer;
+} FhCheatsSafePosition;
 
-static const char* const sJumpSourceNames[] = {"keyboard 0", "Right Stick"};
+static const s16 sFlyCombatModes[] = {0x1f, 0x23, 0x24, 0x25, 0x26, 0x27, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d};
 
 void playerStartWallTransition(GameObject* obj, PlayerState* inner, PlayerState* state);
 
@@ -96,15 +102,17 @@ static GameObject* sCloudRunner;
 static int sCloudRunnerRapidFire;
 static int sSessionActive;
 static int sJump;
-static int sJumpPending = -1;
+static int sJumpPending;
 static u32 sJumpPendingRetrace;
 static int sJumpKeyWasDown;
 static int sJumpStickWasDown;
-static int sDebugSauloJumpActive;
-static u32 sDebugSauloJumpStartRetrace;
-static f32 sDebugSauloJumpStartY;
-static f32 sDebugSauloJumpPeakY;
-static int sDebugSauloJumpLeftGround;
+static int sFly;
+static int sFlyInput;
+static int sFlyUpArmed;
+static int sFlyDownArmed;
+static int sFlyToggleWasDown;
+static int sFlyReturnWasDown;
+static FhCheatsSafePosition sSafe;
 
 int fhCheatsGameplayActive(void) {
   return getGameState() == FH_CHEATS_GAME_STATE_RUNNING && getCurUiDll() == FH_CHEATS_UI_DLL_GAMEPLAY &&
@@ -125,6 +133,8 @@ static void reset_cheats(void) {
   sCloudRunner = NULL;
   sCloudRunnerRapidFire = 0;
   fhCheatsSetJump(0);
+  fhCheatsSetFly(0);
+  sSafe.valid = 0;
 }
 
 void fhCheatsUpdateSession(void) {
@@ -201,13 +211,8 @@ float fhCheatsMoveScale(GameObject* obj) {
 int fhCheatsJumpEnabled(void) { return sJump; }
 
 void fhCheatsSetJump(int enabled) {
-  enabled = enabled != 0;
-  if (enabled != sJump) {
-    DEBUG_SAULO_JUMP_LOG("Jump %s", enabled ? "enabled" : "disabled");
-  }
-  sJump = enabled;
-  sJumpPending = -1;
-  sDebugSauloJumpActive = 0;
+  sJump = enabled != 0;
+  sJumpPending = 0;
 }
 
 static int jump_request_expired(void) {
@@ -216,154 +221,276 @@ static int jump_request_expired(void) {
 
 void fhCheatsJumpPoll(int keyDown, int active) {
   int stickDown = (padGetExtButtons(0) & PAD_BUTTON_RIGHT_STICK) != 0;
-  int source = -1;
+  int pressed;
 
   keyDown = keyDown != 0;
-  if (sJumpPending >= 0 && jump_request_expired()) {
-    DEBUG_SAULO_JUMP_LOG("jump rejected: invalid state (%s jump not reached by normal player control)",
-                         sJumpSourceNames[sJumpPending]);
-    sJumpPending = -1;
+  if (sJumpPending && jump_request_expired()) {
+    sJumpPending = 0;
   }
-  if (sJump && active) {
-    if (keyDown && !sJumpKeyWasDown) {
-      source = FH_CHEATS_JUMP_SOURCE_KEYBOARD;
-    } else if (stickDown && !sJumpStickWasDown) {
-      source = FH_CHEATS_JUMP_SOURCE_RIGHT_STICK;
-    }
-  }
+  pressed = sJump && active && ((keyDown && !sJumpKeyWasDown) || (stickDown && !sJumpStickWasDown));
   sJumpKeyWasDown = keyDown;
   sJumpStickWasDown = stickDown;
-  if (source < 0) {
-    return;
+  if (pressed) {
+    sJumpPending = 1;
+    sJumpPendingRetrace = VIGetRetraceCount();
   }
-  DEBUG_SAULO_JUMP_LOG("%s jump", sJumpSourceNames[source]);
-  sJumpPending = source;
-  sJumpPendingRetrace = VIGetRetraceCount();
 }
 
-static const char* jump_reject_reason(GameObject* player, PlayerState* st) {
-  s16 mode = st->baddie.controlMode;
-
-  if (!fhCheatsGameplayActive() || fhCheatsArwingActive() || fhCheatsCloudRunnerActive()) {
-    return "invalid state (not on foot)";
+static int player_controllable_on_foot(GameObject* player, PlayerState* st) {
+  if (!fhCheatsGameplayActive() || fhCheatsArwingActive() ||
+      st->baddie.controlMode == FH_CHEATS_PLAYER_MODE_ON_CLOUDRUNNER) {
+    return 0;
   }
   if (getCurSeqNo() != 0) {
-    return "invalid state (sequence running)";
+    return 0;
   }
   if ((st->flags360 & PLAYER_FLAG_LOCKED) != 0 || st->characterId == -1) {
-    return "invalid state (controls locked)";
+    return 0;
   }
   if (st->playerStatus == NULL || st->playerStatus->health <= 0) {
-    return "invalid state (dead)";
+    return 0;
+  }
+  if (st->heldObj != NULL || st->verticalVel != 0.0f) {
+    return 0;
+  }
+  return (player->objectFlags & OBJECT_OBJFLAG_PARENT_SLACK) == 0;
+}
+
+static int jump_allowed(GameObject* player, PlayerState* st) {
+  s16 mode = st->baddie.controlMode;
+
+  if (!player_controllable_on_foot(player, st)) {
+    return 0;
   }
   if (mode != FH_CHEATS_PLAYER_MODE_IDLE && mode != FH_CHEATS_PLAYER_MODE_MOVING) {
-    return "invalid state (control mode)";
+    return 0;
   }
-  if (st->flags3F0.b20) {
-    return "invalid state (swimming)";
-  }
-  if (st->flags3F0.b02 || st->flags3F0.b10 || st->flags3F0.b40 || st->flags3F0.b80) {
-    return "invalid state (guard, attack or quick turn)";
-  }
-  if (st->heldObj != NULL) {
-    return "invalid state (carrying object)";
+  if (st->flags3F0.b20 || st->flags3F0.b02 || st->flags3F0.b10 || st->flags3F0.b40 || st->flags3F0.b80) {
+    return 0;
   }
   if (st->baddie.targetObj != NULL || st->flags3F6.b40) {
-    return "invalid state (target lock)";
-  }
-  if (st->verticalVel != 0.0f) {
-    return "invalid state (climbing)";
+    return 0;
   }
   if (st->curAnimId == 0x44 || st->curAnimId == 0x4e || st->curAnimId == 0x47 || st->curAnimId == 0x48) {
-    return "invalid state (camera mode)";
+    return 0;
   }
-  if ((player->objectFlags & OBJECT_OBJFLAG_PARENT_SLACK) != 0) {
-    return "invalid state (attached to object)";
-  }
-  if (st->flags3F0.b04 || st->flags3F0.b08 || !st->flags3F1.b01) {
-    return "airborne";
-  }
-  return NULL;
-}
-
-static void debug_saulo_jump_begin(GameObject* player) {
-  sDebugSauloJumpActive = 1;
-  sDebugSauloJumpLeftGround = 0;
-  sDebugSauloJumpStartRetrace = VIGetRetraceCount();
-  sDebugSauloJumpStartY = player->anim.worldPosY;
-  sDebugSauloJumpPeakY = player->anim.worldPosY;
-}
-
-static void debug_saulo_jump_track(GameObject* player, PlayerState* st) {
-  unsigned elapsed;
-
-  if (!sDebugSauloJumpActive) {
-    return;
-  }
-  elapsed = (unsigned)(VIGetRetraceCount() - sDebugSauloJumpStartRetrace);
-  if (player->anim.worldPosY > sDebugSauloJumpPeakY) {
-    sDebugSauloJumpPeakY = player->anim.worldPosY;
-  }
-  if (!st->flags3F1.b01) {
-    sDebugSauloJumpLeftGround = 1;
-  }
-  if (st->baddie.controlMode != FH_CHEATS_PLAYER_MODE_IDLE && st->baddie.controlMode != FH_CHEATS_PLAYER_MODE_MOVING) {
-    DEBUG_SAULO_JUMP_LOG("jump ended in control mode %d after %u retraces, peak +%.1f", st->baddie.controlMode,
-                         elapsed, sDebugSauloJumpPeakY - sDebugSauloJumpStartY);
-  } else if (sDebugSauloJumpLeftGround && st->flags3F1.b01 && !st->flags3F0.b08) {
-    DEBUG_SAULO_JUMP_LOG("jump landed after %u retraces, peak +%.1f, landing height %+.1f, fall mode %d", elapsed,
-                         sDebugSauloJumpPeakY - sDebugSauloJumpStartY, player->anim.worldPosY - sDebugSauloJumpStartY,
-                         st->flags3F0.b04);
-  } else if (!sDebugSauloJumpLeftGround && elapsed > DEBUG_SAULO_JUMP_GROUND_RETRACES) {
-    DEBUG_SAULO_JUMP_LOG("jump never left the ground");
-  } else if (elapsed > DEBUG_SAULO_JUMP_TRACK_RETRACES) {
-    DEBUG_SAULO_JUMP_LOG("jump still airborne after %u retraces, peak +%.1f", elapsed,
-                         sDebugSauloJumpPeakY - sDebugSauloJumpStartY);
-  } else {
-    return;
-  }
-  sDebugSauloJumpActive = 0;
-}
-
-static int jump_start(GameObject* player, PlayerState* st, int source) {
-  s16 mode = st->baddie.controlMode;
-  f32 nativeVelocity;
-
-  playerStartWallTransition(player, st, st);
-  nativeVelocity = player->anim.velocityY;
-  player->anim.velocityY = FH_CHEATS_JUMP_VELOCITY;
-  DEBUG_SAULO_JUMP_LOG("jump started from %s: velocityY=%.2f (native %.2f), move=0x%X, mode=%d%s",
-                       sJumpSourceNames[source], player->anim.velocityY, nativeVelocity,
-                       (unsigned)(u16)player->anim.currentMove, mode, mode == FH_CHEATS_PLAYER_MODE_IDLE ? "->2" : "");
-  debug_saulo_jump_begin(player);
-  return mode == FH_CHEATS_PLAYER_MODE_IDLE ? FH_CHEATS_PLAYER_ENTER_MOVING : 0;
+  return !st->flags3F0.b04 && !st->flags3F0.b08 && st->flags3F1.b01;
 }
 
 int fhCheatsJumpUpdate(GameObject* player) {
   PlayerState* st;
-  const char* reason;
-  int source;
+  s16 mode;
 
-  if (!sJump || player == NULL || player != Obj_GetPlayerObject()) {
+  if (!sJump || player == NULL || player != Obj_GetPlayerObject() || !sJumpPending) {
     return 0;
+  }
+  sJumpPending = 0;
+  st = player->extra;
+  if (jump_request_expired() || !jump_allowed(player, st)) {
+    return 0;
+  }
+  mode = st->baddie.controlMode;
+  playerStartWallTransition(player, st, st);
+  player->anim.velocityY = FH_CHEATS_JUMP_VELOCITY;
+  return mode == FH_CHEATS_PLAYER_MODE_IDLE ? FH_CHEATS_PLAYER_ENTER_MOVING : 0;
+}
+
+int fhCheatsFlyEnabled(void) { return sFly; }
+
+void fhCheatsSetFly(int enabled) {
+  sFly = enabled != 0;
+  sFlyInput = 0;
+  sFlyUpArmed = 0;
+  sFlyDownArmed = 0;
+}
+
+static int safe_position_warp_active(void) { return gArrivedWarpIndex != -1 || gPendingWarpIndex != -1; }
+
+static void safe_position_check_map(void) {
+  if (sSafe.valid && (safe_position_warp_active() || sSafe.mapId != gGameLoopPendingMapId ||
+                      sSafe.layer != getCurMapLayer())) {
+    sSafe.valid = 0;
+  }
+}
+
+static int safe_position_allowed(GameObject* player, PlayerState* st) {
+  if (safe_position_warp_active()) {
+    return 0;
+  }
+  if (player->anim.parent != NULL || st->focusObject != NULL) {
+    return 0;
+  }
+  if ((st->flags360 & FH_CHEATS_PLAYER_TELEPORT_HOLD) != 0) {
+    return 0;
+  }
+  if (isInBounds(player->anim.localPosX, player->anim.localPosZ) != 1) {
+    return 0;
+  }
+  return !(st->baddie.curvesCollision.resultFloorY <= FH_CHEATS_NO_FLOOR_Y);
+}
+
+static void safe_position_update(GameObject* player, PlayerState* st) {
+  safe_position_check_map();
+  if (!safe_position_allowed(player, st)) {
+    return;
+  }
+  sSafe.valid = 1;
+  sSafe.pos.x = player->anim.localPosX;
+  sSafe.pos.y = player->anim.localPosY;
+  sSafe.pos.z = player->anim.localPosZ;
+  sSafe.rot.x = player->anim.rotX;
+  sSafe.rot.y = player->anim.rotY;
+  sSafe.rot.z = player->anim.rotZ;
+  sSafe.swimming = st->flags3F0.b20;
+  sSafe.mapId = gGameLoopPendingMapId;
+  sSafe.layer = getCurMapLayer();
+}
+
+void fhCheatsReturnToSafePosition(void) {
+  GameObject* player;
+  PlayerState* st;
+
+  safe_position_check_map();
+  if (sSafe.valid && isInBounds(sSafe.pos.x, sSafe.pos.z) != 1) {
+    sSafe.valid = 0;
+  }
+  if (!sSafe.valid || !fhCheatsGameplayActive() || fhCheatsArwingActive() ||
+      (player = Obj_GetPlayerObject()) == NULL) {
+    return;
   }
   st = player->extra;
-  debug_saulo_jump_track(player, st);
-  source = sJumpPending;
-  if (source < 0) {
+  if (!player_controllable_on_foot(player, st)) {
+    return;
+  }
+  if (player->anim.parent != NULL) {
+    Obj_SetParent(player, NULL, 1);
+  }
+  player->anim.velocityX = 0.0f;
+  player->anim.velocityY = 0.0f;
+  player->anim.velocityZ = 0.0f;
+  st->baddie.animSpeedA = 0.0f;
+  st->baddie.animSpeedB = 0.0f;
+  st->baddie.animSpeedC = 0.0f;
+  st->flags3F0.b04 = 0;
+  st->flags3F0.b08 = 0;
+  st->staffHoldFrames = 0;
+  if (!sSafe.swimming) {
+    st->flags3F0.b20 = 0;
+  }
+  playerTeleport(player, &sSafe.pos, &sSafe.rot, 0);
+  objSetPos(player, sSafe.pos.x, sSafe.pos.y, sSafe.pos.z);
+  playerTeleport(player, NULL, NULL, 0);
+}
+
+static int fly_key_held(int* armed, int keyDown, int active) {
+  if (!active) {
+    *armed = 0;
     return 0;
   }
-  sJumpPending = -1;
-  if (jump_request_expired()) {
-    DEBUG_SAULO_JUMP_LOG("jump rejected: invalid state (%s jump request expired)", sJumpSourceNames[source]);
+  if (!keyDown) {
+    *armed = 1;
     return 0;
   }
-  reason = jump_reject_reason(player, st);
-  if (reason != NULL) {
-    DEBUG_SAULO_JUMP_LOG("jump rejected: %s (%s, mode=%d)", reason, sJumpSourceNames[source], st->baddie.controlMode);
+  return *armed;
+}
+
+void fhCheatsFlyPoll(int toggleKeyDown, int upKeyDown, int downKeyDown, int returnKeyDown, int active) {
+  int up;
+  int down;
+
+  safe_position_check_map();
+  toggleKeyDown = toggleKeyDown != 0;
+  returnKeyDown = returnKeyDown != 0;
+  if (active && toggleKeyDown && !sFlyToggleWasDown && !fhCheatsArwingActive()) {
+    fhCheatsSetFly(!sFly);
+  }
+  sFlyToggleWasDown = toggleKeyDown;
+  if (active && returnKeyDown && !sFlyReturnWasDown) {
+    fhCheatsReturnToSafePosition();
+  }
+  sFlyReturnWasDown = returnKeyDown;
+  active = sFly && active;
+  up = fly_key_held(&sFlyUpArmed, upKeyDown != 0, active);
+  down = fly_key_held(&sFlyDownArmed, downKeyDown != 0, active);
+  sFlyInput = up - down;
+}
+
+static int fly_mode_allowed(s16 mode) {
+  int i;
+
+  if (mode == FH_CHEATS_PLAYER_MODE_IDLE || mode == FH_CHEATS_PLAYER_MODE_MOVING) {
+    return 1;
+  }
+  for (i = 0; i < (int)(sizeof(sFlyCombatModes) / sizeof(sFlyCombatModes[0])); i++) {
+    if (sFlyCombatModes[i] == mode) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int fly_allowed(GameObject* player, PlayerState* st) {
+  if (!player_controllable_on_foot(player, st) || !fly_mode_allowed(st->baddie.controlMode)) {
     return 0;
   }
-  return jump_start(player, st, source);
+  return !(st->flags3F0.b04 && st->flags3F1.b01);
+}
+
+static int fly_input(PlayerState* st) {
+  if (st->curAnimId == CAMERA_MODE_VIEWFINDER_RESOURCE_ID || st->curAnimId == CAMERA_MODE_WORLD_MAP_RESOURCE_ID) {
+    return 0;
+  }
+  return sFlyInput;
+}
+
+static int fly_at_swim_surface(PlayerState* st, int input) {
+  return st->flags3F0.b20 && input == 0 && st->waterDepth <= FH_CHEATS_FLY_SWIM_SURFACE_DEPTH;
+}
+
+static int fly_crossed_water_surface(PlayerState* st, int input) {
+  s16 mode = st->baddie.controlMode;
+
+  return st->flags3F0.b20 && input > 0 && st->waterDepth < 0.0f &&
+         (mode == FH_CHEATS_PLAYER_MODE_IDLE || mode == FH_CHEATS_PLAYER_MODE_MOVING);
+}
+
+static void fly_keep_inside_map(GameObject* player, PlayerState* st) {
+  f32 step;
+
+  if (player->anim.parent != NULL || st->focusObject != NULL) {
+    return;
+  }
+  step = timeDelta * fhCheatsMoveScale(player);
+  if (isInBounds(player->anim.localPosX + player->anim.velocityX * step,
+                 player->anim.localPosZ + player->anim.velocityZ * step) == 0) {
+    player->anim.velocityX = 0.0f;
+    player->anim.velocityZ = 0.0f;
+  }
+}
+
+void fhCheatsFlyUpdate(GameObject* player) {
+  PlayerState* st;
+  int input;
+
+  if (!sFly || player == NULL || player != Obj_GetPlayerObject()) {
+    return;
+  }
+  st = player->extra;
+  if (!fly_allowed(player, st)) {
+    return;
+  }
+  st->flags3F0.b08 = 0;
+  st->flags3F0.b04 = 0;
+  st->staffHoldFrames = 0;
+  input = fly_input(st);
+  if (!fly_at_swim_surface(st, input)) {
+    player->anim.velocityY = (f32)input * FH_CHEATS_FLY_VERTICAL_SPEED;
+  }
+  if (fly_crossed_water_surface(st, input)) {
+    st->flags3F0.b20 = 0;
+  }
+  fly_keep_inside_map(player, st);
+  safe_position_update(player, st);
 }
 
 int fhCheatsArwingActive(void) { return fhCheatsGameplayActive() && getArwing() != NULL; }

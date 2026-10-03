@@ -25,6 +25,10 @@ void set_pad_blocked(bool blocked) {
   PADBlockInput(blocked);
 }
 
+bool key_down(const bool* keys, int keyCount, SDL_Scancode scancode) {
+  return keys != nullptr && keyCount > scancode && keys[scancode];
+}
+
 void draw_menu_contents() {
   ImGui::SetWindowFontScale(kMenuFontScale);
 
@@ -45,6 +49,14 @@ void draw_menu_contents() {
     bool jump = fhCheatsJumpEnabled() != 0;
     if (ImGui::Checkbox("Jump", &jump)) {
       fhCheatsSetJump(jump ? 1 : 0);
+    }
+    bool fly = fhCheatsFlyEnabled() != 0;
+    if (ImGui::Checkbox("Fly Mode", &fly)) {
+      fhCheatsSetFly(fly ? 1 : 0);
+    }
+    ImGui::TextDisabled("F5 Toggle  F6 Up  F7 Down  F8 Safe");
+    if (ImGui::Button("Return to Safe Position", ImVec2(-FLT_MIN, 0.0f))) {
+      fhCheatsReturnToSafePosition();
     }
     if (fhCheatsPlayerIsFox() && ImGui::Button("Give All Abilities", ImVec2(-FLT_MIN, 0.0f))) {
       fhCheatsGiveAllStaffAbilities();
@@ -147,8 +159,13 @@ extern "C" void fhCheatsDrawOverlay(void) {
     sOpen = !sOpen;
   }
 
-  const bool jumpKeyDown = keys != nullptr && keyCount > SDL_SCANCODE_0 && keys[SDL_SCANCODE_0];
-  fhCheatsJumpPoll(jumpKeyDown ? 1 : 0, gameplay && !sOpen && !ImGui::GetIO().WantCaptureKeyboard ? 1 : 0);
+  const bool controlsActive = gameplay && !sOpen && !ImGui::GetIO().WantCaptureKeyboard;
+  const bool jumpKeyDown = key_down(keys, keyCount, SDL_SCANCODE_P);
+  fhCheatsJumpPoll(jumpKeyDown ? 1 : 0, controlsActive && !fhCheatsFlyEnabled() ? 1 : 0);
+
+  fhCheatsFlyPoll(key_down(keys, keyCount, SDL_SCANCODE_F5) ? 1 : 0, key_down(keys, keyCount, SDL_SCANCODE_F6) ? 1 : 0,
+                  key_down(keys, keyCount, SDL_SCANCODE_F7) ? 1 : 0, key_down(keys, keyCount, SDL_SCANCODE_F8) ? 1 : 0,
+                  controlsActive ? 1 : 0);
 
   if (sOpen) {
     draw_menu();

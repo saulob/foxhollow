@@ -29,6 +29,12 @@ void fhCheatsSetJump(int enabled);
 void fhCheatsJumpPoll(int keyDown, int active);
 int fhCheatsJumpUpdate(struct GameObject* player);
 
+int fhCheatsFlyEnabled(void);
+void fhCheatsSetFly(int enabled);
+void fhCheatsFlyPoll(int toggleKeyDown, int upKeyDown, int downKeyDown, int returnKeyDown, int active);
+void fhCheatsFlyUpdate(struct GameObject* player);
+void fhCheatsReturnToSafePosition(void);
+
 int fhCheatsArwingActive(void);
 int fhCheatsArwingGodModeEnabled(void);
 void fhCheatsSetArwingGodMode(int enabled);
